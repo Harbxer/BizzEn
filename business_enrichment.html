@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Business Enrichment</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; padding: 16px; max-width: 900px; margin: 0 auto; background: #f9fafb; }
+    h2 { font-size: 20px; margin-bottom: 4px; padding-top: 16px; }
+    .subtitle { color: #666; font-size: 13px; margin-bottom: 18px; }
+
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+    .card h3 { font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #111; }
+
+    label { font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px; }
+    select { width: 100%; padding: 8px 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 10px; }
+
+    .col-map { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .btn { padding: 10px 18px; font-size: 14px; border: none; border-radius: 6px; cursor: pointer; margin: 3px 4px 3px 0; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-blue  { background: #2563eb; color: #fff; }
+    .btn-green { background: #16a34a; color: #fff; }
+    .btn-gray  { background: #e5e7eb; color: #111; }
+    .btn-red   { background: #dc2626; color: #fff; }
+
+    #drop-zone {
+      border: 2px dashed #cbd5e1; border-radius: 8px;
+      padding: 30px; text-align: center; cursor: pointer;
+      color: #64748b; font-size: 14px; transition: background 0.2s;
+    }
+    #drop-zone.hover { background: #eff6ff; border-color: #2563eb; }
+    #drop-zone input { display: none; }
+
+    .status-bar { padding: 9px 13px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; display: none; }
+    .status-bar.info    { display: block; background: #eff6ff; color: #1d4ed8; }
+    .status-bar.success { display: block; background: #f0fdf4; color: #15803d; }
+    .status-bar.error   { display: block; background: #fef2f2; color: #dc2626; }
+    .status-bar.warn    { display: block; background: #fffbeb; color: #92400e; }
+
+    .progress-wrap { background: #e5e7eb; border-radius: 99px; height: 8px; margin: 8px 0 4px; display: none; }
+    .progress-bar  { background: #2563eb; height: 8px; border-radius: 99px; width: 0%; transition: width 0.3s; }
+
+    #stats { font-size: 12px; color: #555; margin-bottom: 8px; display: none; }
+    #stats span { margin-right: 14px; }
+    #stats .found { color: #16a34a; font-weight: bold; }
+    #stats .empty { color: #dc2626; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #f1f5f9; text-align: left; padding: 7px 8px; border-bottom: 2px solid #e2e8f0; font-size: 12px; position: sticky; top: 0; }
+    td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    tr:hover td { background: #f8fafc; }
+    .tag { display: inline-block; padding: 2px 7px; border-radius: 99px; font-size: 11px; }
+    .tag-green { background: #dcfce7; color: #15803d; }
+    .tag-red   { background: #fee2e2; color: #dc2626; }
+    .tag-gray  { background: #f1f5f9; color: #64748b; }
+    .tag-spin  { background: #eff6ff; color: #2563eb; }
+
+    #table-wrap { max-height: 380px; overflow-y: auto; display: none; margin-top: 6px; }
+  </style>
+</head>
+<body>
+
+<h2>📋 Business Enrichment Tool</h2>
+<p class="subtitle">Upload a CSV → auto-fills phone, email, website, and business type for each row</p>
+
+<!-- Step 1: Upload -->
+<div class="card">
+  <h3>Step 1 — Upload your CSV</h3>
+  <div id="drop-zone" onclick="document.getElementById('csv-input').click()"
+       ondragover="event.preventDefault();this.classList.add('hover')"
+       ondragleave="this.classList.remove('hover')"
+       ondrop="handleDrop(event)">
+    <input type="file" id="csv-input" accept=".csv" onchange="handleFile(this.files[0])"/>
+    📂 Click to choose a CSV file or drag and drop it here
+  </div>
+</div>
+
+<!-- Step 2: Map columns -->
+<div class="card" id="map-card" style="display:none">
+  <h3>Step 2 — Map your columns</h3>
+  <div class="col-map">
+    <div>
+      <label>Business Name column</label>
+      <select id="col-name"></select>
+    </div>
+    <div>
+      <label>Address column</label>
+      <select id="col-address"></select>
+    </div>
+    <div>
+      <label>City column (optional)</label>
+      <select id="col-city"></select>
+    </div>
+    <div>
+      <label>State column (optional)</label>
+      <select id="col-state"></select>
+    </div>
+  </div>
+  <button class="btn btn-blue" onclick="startEnrichment()">🔍 Start Enrichment</button>
+  <span style="font-size:12px;color:#888;margin-left:8px;">Processes ~1 business every 2 seconds to avoid blocks</span>
+</div>
+
+<!-- Step 3: Results -->
+<div class="card" id="results-card" style="display:none">
+  <h3>Step 3 — Results</h3>
+  <div id="main-status" class="status-bar"></div>
+  <div class="progress-wrap" id="prog-wrap"><div class="progress-bar" id="prog-bar"></div></div>
+  <div id="stats">
+    <span>Total: <b id="s-total">0</b></span>
+    <span>Done: <b id="s-done">0</b></span>
+    <span class="found">Found: <b id="s-found">0</b></span>
+    <span class="empty">Empty: <b id="s-empty">0</b></span>
+  </div>
+  <div>
+    <button class="btn btn-red"  id="stop-btn"   onclick="stopEnrichment()"  style="display:none">⏹ Stop</button>
+    <button class="btn btn-green" id="export-btn" onclick="exportCSV()"       style="display:none">⬇️ Export CSV</button>
+    <button class="btn btn-gray"  id="exportp-btn" onclick="exportPartial()"  style="display:none">⬇️ Export What We Have</button>
+  </div>
+  <div id="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Business Name</th>
+          <th>Phone</th>
+          <th>Email</th>
+          <th>Website</th>
+          <th>Type</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="result-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────
+let csvRows    = [];
+let headers    = [];
+let enriched   = [];
+let running    = false;
+let stopFlag   = false;
+let doneCount  = 0;
+let foundCount = 0;
+
+// ── CSV Parser ─────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const hdrs  = splitCSVLine(lines[0]);
+  const rows  = lines.slice(1).map(l => {
+    const vals = splitCSVLine(l);
+    const obj  = {};
+    hdrs.forEach((h, i) => obj[h] = vals[i] || "");
+    return obj;
+  });
+  return { headers: hdrs, rows };
+}
+
+function splitCSVLine(line) {
+  const result = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur.trim()); cur = ""; }
+    else { cur += c; }
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+// ── File Handling ──────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById("drop-zone").classList.remove("hover");
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+}
+
+function handleFile(file) {
+  if (!file || !file.name.endsWith(".csv")) {
+    return alert("Please upload a .csv file.");
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const parsed = parseCSV(e.target.result);
+    headers = parsed.headers;
+    csvRows = parsed.rows;
+    document.getElementById("drop-zone").innerHTML =
+      "✅ <b>" + file.name + "</b> — " + csvRows.length.toLocaleString() + " rows loaded";
+    populateColumnSelectors();
+    document.getElementById("map-card").style.display = "block";
+  };
+  reader.readAsText(file);
+}
+
+function populateColumnSelectors() {
+  ["col-name","col-address","col-city","col-state"].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">— none —</option>';
+    headers.forEach(h => {
+      const opt = document.createElement("option");
+      opt.value = h; opt.textContent = h;
+      // Auto-select likely columns
+      const hl = h.toLowerCase();
+      if (id === "col-name"    && (hl.includes("name") || hl.includes("business"))) opt.selected = true;
+      if (id === "col-address" && hl.includes("address")) opt.selected = true;
+      if (id === "col-city"    && hl.includes("city"))    opt.selected = true;
+      if (id === "col-state"   && hl.includes("state"))   opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+// ── Search & Extract ───────────────────────────────────────
+const PHONE_RE  = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g;
+const EMAIL_RE  = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const URL_RE    = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&/=]*)/g;
+
+function extractFromText(text) {
+  const phones  = text.match(PHONE_RE)  || [];
+  const emails  = (text.match(EMAIL_RE) || []).filter(e => !e.includes("example") && !e.includes("sentry") && !e.includes("google") && !e.includes("schema") && !e.includes("w3.org"));
+  const urls    = (text.match(URL_RE)   || []).filter(u => !u.includes("google") && !u.includes("facebook") && !u.includes("yelp") && !u.includes("schema") && !u.includes("w3.org") && !u.includes("twitter"));
+  return {
+    phone:   phones[0]  || "",
+    email:   emails[0]  || "",
+    website: urls[0]    || ""
+  };
+}
+
+async function searchBusiness(name, address, city, state) {
+  const query = [name, address, city, state].filter(Boolean).join(" ").trim();
+  const encodedQ = encodeURIComponent(query + " phone email");
+
+  // Try DuckDuckGo Instant Answer API first (no CORS issues)
+  try {
+    const ddgUrl = "https://api.duckduckgo.com/?q=" + encodedQ + "&format=json&no_html=1&skip_disambig=1";
+    const res = await fetch(ddgUrl);
+    const json = await res.json();
+
+    let phone = "", email = "", website = "", type = "";
+
+    // Pull from DDG structured data
+    if (json.Phone)   phone   = json.Phone;
+    if (json.Email)   email   = json.Email;
+    if (json.Website) website = json.Website;
+    if (json.Type)    type    = json.Type;
+
+    // Also scan abstract and infobox
+    const infoText = JSON.stringify(json.Infobox || "") + " " + (json.AbstractText || "");
+    const extracted = extractFromText(infoText);
+    if (!phone   && extracted.phone)   phone   = extracted.phone;
+    if (!email   && extracted.email)   email   = extracted.email;
+    if (!website && extracted.website) website = extracted.website;
+
+    if (phone || email || website) return { phone, email, website, type };
+  } catch(e) {}
+
+  // Fallback: allorigins CORS proxy to fetch a Google search page
+  try {
+    const googleUrl = "https://www.google.com/search?q=" + encodedQ;
+    const proxyUrl  = "https://api.allorigins.win/raw?url=" + encodeURIComponent(googleUrl);
+    const res = await fetch(proxyUrl);
+    const html = await res.text();
+
+    // Strip tags for cleaner regex
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const extracted = extractFromText(text);
+    if (extracted.phone || extracted.email || extracted.website) {
+      return { ...extracted, type: "" };
+    }
+  } catch(e) {}
+
+  return { phone: "", email: "", website: "", type: "" };
+}
+
+// ── Enrichment Loop ────────────────────────────────────────
+async function startEnrichment() {
+  const colName    = document.getElementById("col-name").value;
+  const colAddress = document.getElementById("col-address").value;
+  const colCity    = document.getElementById("col-city").value;
+  const colState   = document.getElementById("col-state").value;
+
+  if (!colName) return alert("Please select the Business Name column.");
+
+  enriched   = JSON.parse(JSON.stringify(csvRows)); // deep copy
+  running    = true;
+  stopFlag   = false;
+  doneCount  = 0;
+  foundCount = 0;
+
+  document.getElementById("results-card").style.display = "block";
+  document.getElementById("stop-btn").style.display     = "inline-block";
+  document.getElementById("exportp-btn").style.display  = "inline-block";
+  document.getElementById("export-btn").style.display   = "none";
+  document.getElementById("prog-wrap").style.display    = "block";
+  document.getElementById("stats").style.display        = "block";
+  document.getElementById("table-wrap").style.display   = "block";
+  document.getElementById("result-body").innerHTML      = "";
+
+  document.getElementById("s-total").textContent = csvRows.length.toLocaleString();
+  setStatus("Running enrichment…", "info");
+
+  document.getElementById("results-card").scrollIntoView({ behavior: "smooth" });
+
+  for (let i = 0; i < csvRows.length; i++) {
+    if (stopFlag) break;
+
+    const row  = csvRows[i];
+    const name = row[colName]    || "";
+    const addr = row[colAddress] || "";
+    const city = row[colCity]    || "";
+    const st   = row[colState]   || "";
+
+    // Add a pending row to the table
+    addTableRow(i, name, null);
+
+    const result = await searchBusiness(name, addr, city, st);
+
+    // Merge into enriched
+    if (!enriched[i]["phone"])   enriched[i]["phone"]   = result.phone;
+    if (!enriched[i]["email"])   enriched[i]["email"]   = result.email;
+    if (!enriched[i]["website"]) enriched[i]["website"] = result.website;
+    if (!enriched[i]["type"] && result.type) enriched[i]["type"] = result.type;
+
+    doneCount++;
+    const hasData = result.phone || result.email || result.website;
+    if (hasData) foundCount++;
+
+    updateTableRow(i, name, result);
+    document.getElementById("s-done").textContent  = doneCount.toLocaleString();
+    document.getElementById("s-found").textContent = foundCount.toLocaleString();
+    document.getElementById("s-empty").textContent = (doneCount - foundCount).toLocaleString();
+    document.getElementById("prog-bar").style.width = Math.round((doneCount / csvRows.length) * 100) + "%";
+
+    // Delay to avoid rate limits (~1 per 2s)
+    await delay(2000);
+  }
+
+  running = false;
+  document.getElementById("stop-btn").style.display  = "none";
+  document.getElementById("export-btn").style.display = "inline-block";
+
+  if (stopFlag) {
+    setStatus("Stopped at row " + doneCount + ". Export what we have below.", "warn");
+  } else {
+    setStatus("✅ Done! " + foundCount + " of " + csvRows.length + " businesses enriched.", "success");
+  }
+}
+
+function stopEnrichment() {
+  stopFlag = true;
+  setStatus("Stopping after current row…", "warn");
+}
+
+function delay(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
+// ── Table ──────────────────────────────────────────────────
+function addTableRow(i, name, result) {
+  const tbody = document.getElementById("result-body");
+  const tr = document.createElement("tr");
+  tr.id = "row-" + i;
+  tr.innerHTML =
+    "<td>" + (i + 1) + "</td>" +
+    "<td title='" + esc(name) + "'>" + esc(name.slice(0, 30)) + "</td>" +
+    "<td>—</td><td>—</td><td>—</td><td>—</td>" +
+    "<td><span class='tag tag-spin'>searching…</span></td>";
+  tbody.appendChild(tr);
+  tr.scrollIntoView({ block: "nearest" });
+}
+
+function updateTableRow(i, name, result) {
+  const tr = document.getElementById("row-" + i);
+  if (!tr) return;
+  const hasData = result.phone || result.email || result.website;
+  tr.innerHTML =
+    "<td>" + (i + 1) + "</td>" +
+    "<td title='" + esc(name) + "'>" + esc(name.slice(0, 30)) + "</td>" +
+    "<td>" + esc(result.phone   || "—") + "</td>" +
+    "<td title='" + esc(result.email || "") + "'>" + esc((result.email   || "—").slice(0, 22)) + "</td>" +
+    "<td title='" + esc(result.website || "") + "'>" + esc((result.website || "—").slice(0, 25)) + "</td>" +
+    "<td>" + esc(result.type || "—") + "</td>" +
+    "<td><span class='tag " + (hasData ? "tag-green" : "tag-red") + "'>" + (hasData ? "found" : "empty") + "</span></td>";
+}
+
+function esc(str) {
+  return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Export ─────────────────────────────────────────────────
+function exportCSV()     { doExport(enriched); }
+function exportPartial() { doExport(enriched.slice(0, doneCount)); }
+
+function doExport(data) {
+  if (!data.length) return alert("Nothing to export yet.");
+  const hdrs = [...new Set([...headers, "phone", "email", "website", "type"])];
+  const csv  = [
+    hdrs.join(","),
+    ...data.map(row =>
+      hdrs.map(h => '"' + ((row[h] || "").toString().replace(/"/g, '""')) + '"').join(",")
+    )
+  ].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a    = document.createElement("a");
+  a.href     = URL.createObjectURL(blob);
+  a.download = "enriched_businesses.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Status ─────────────────────────────────────────────────
+function setStatus(msg, type) {
+  const el = document.getElementById("main-status");
+  el.textContent = msg;
+  el.className = "status-bar " + (type || "");
+}
+</script>
+</body>
+</html>

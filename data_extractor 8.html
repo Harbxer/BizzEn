@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Extractor</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; padding: 16px; max-width: 700px; margin: 0 auto; }
+    h2 { font-size: 20px; margin-bottom: 14px; }
+    label { font-weight: bold; font-size: 14px; }
+    input[type="text"] {
+      width: 100%; padding: 10px; font-size: 14px;
+      border: 1px solid #ccc; border-radius: 6px;
+      margin: 6px 0 10px; display: block;
+    }
+    .btn {
+      padding: 11px 20px; font-size: 15px;
+      border: none; border-radius: 6px;
+      cursor: pointer; margin: 4px 4px 4px 0;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-blue  { background: #2563eb; color: #fff; }
+    .btn-green { background: #16a34a; color: #fff; }
+    .btn-gray  { background: #e5e7eb; color: #111; }
+    .btn-red   { background: #dc2626; color: #fff; }
+
+    #status {
+      font-size: 13px; margin: 8px 0 4px;
+      padding: 8px 12px; border-radius: 6px; display: none;
+    }
+    #status.info    { display: block; background: #eff6ff; color: #1d4ed8; }
+    #status.success { display: block; background: #f0fdf4; color: #15803d; }
+    #status.error   { display: block; background: #fef2f2; color: #dc2626; }
+
+    #progress-bar-wrap {
+      display: none; background: #e5e7eb;
+      border-radius: 99px; height: 10px; margin: 8px 0;
+    }
+    #progress-bar {
+      background: #2563eb; height: 10px;
+      border-radius: 99px; width: 0%;
+      transition: width 0.3s;
+    }
+
+    #fields-section { display: none; margin-top: 18px; }
+    #fields-section h3 { font-size: 15px; margin: 0 0 4px; }
+    #fields-section p  { font-size: 13px; color: #555; margin: 0 0 8px; }
+    .select-links { font-size: 13px; margin-bottom: 8px; }
+    .select-links a { color: #2563eb; cursor: pointer; text-decoration: underline; margin-right: 12px; }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 5px; border: 1px solid #ddd; border-radius: 6px;
+      padding: 10px; background: #fafafa;
+      max-height: 280px; overflow-y: auto;
+    }
+    .field-label {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 13px; padding: 6px; border-radius: 4px; cursor: pointer;
+    }
+    .field-label:hover { background: #f0f0f0; }
+    .field-label input { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+
+    #results-section { display: none; margin-top: 20px; }
+    #results-section h3 { font-size: 15px; margin-bottom: 6px; }
+    pre {
+      background: #f4f4f4; padding: 10px; border-radius: 5px;
+      font-size: 11px; overflow-x: auto;
+      max-height: 180px; overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+
+<h2>🗂 KCMO Data Extractor</h2>
+
+<label for="apiUrl">API URL</label>
+<input type="text" id="apiUrl" value="https://data.kcmo.org/resource/96my-yprt.json" />
+
+<button class="btn btn-blue" id="fetchBtn" onclick="fetchAllData()">🔍 Load All Records</button>
+<button class="btn btn-red" id="cancelBtn" onclick="cancelFetch()" style="display:none">✕ Cancel</button>
+
+<div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+<div id="status"></div>
+
+<div id="fields-section">
+  <h3>Select Columns to Import</h3>
+  <p id="col-count"></p>
+  <div class="select-links">
+    <a onclick="selectAll()">Select all</a>
+    <a onclick="selectNone()">Clear all</a>
+  </div>
+  <div class="field-grid" id="fields"></div>
+  <br>
+  <button class="btn btn-green" onclick="importData()">⬇️ Import Selected</button>
+</div>
+
+<div id="results-section">
+  <h3>Preview (first 3 rows)</h3>
+  <pre id="preview"></pre>
+  <br>
+  <button class="btn btn-gray" onclick="exportJSON()">Export JSON</button>
+  <button class="btn btn-gray" onclick="exportCSV()">Export CSV</button>
+</div>
+
+<script>
+  const PAGE_SIZE = 1000;
+  let allRows   = [];
+  let columns   = [];
+  let imported  = [];
+  let cancelled = false;
+
+  function setStatus(msg, type) {
+    const el = document.getElementById("status");
+    el.textContent = msg;
+    el.className = type || "";
+  }
+
+  function setProgress(pct) {
+    document.getElementById("progress-bar-wrap").style.display = "block";
+    document.getElementById("progress-bar").style.width = pct + "%";
+  }
+
+  function hideProgress() {
+    document.getElementById("progress-bar-wrap").style.display = "none";
+    document.getElementById("progress-bar").style.width = "0%";
+  }
+
+  function selectAll()  { document.querySelectorAll(".col-check").forEach(c => c.checked = true); }
+  function selectNone() { document.querySelectorAll(".col-check").forEach(c => c.checked = false); }
+
+  function cancelFetch() {
+    cancelled = true;
+  }
+
+  async function fetchAllData() {
+    const baseUrl = document.getElementById("apiUrl").value.trim();
+    if (!baseUrl) return setStatus("Please enter a URL.", "error");
+
+    cancelled = false;
+    allRows = [];
+    columns = [];
+    document.getElementById("fields-section").style.display  = "none";
+    document.getElementById("results-section").style.display = "none";
+    document.getElementById("fetchBtn").disabled = true;
+    document.getElementById("cancelBtn").style.display = "inline-block";
+    setProgress(0);
+    setStatus("Starting download…", "info");
+
+    try {
+      const sep = baseUrl.includes("?") ? "&" : "?";
+      const PARALLEL = 8; // fetch 8 pages at once
+      let offset = 0;
+      let done = false;
+
+      // Detect columns from first row
+      const firstRes = await fetch(baseUrl + sep + "$limit=1&$offset=0");
+      if (!firstRes.ok) throw new Error("Server returned " + firstRes.status);
+      const firstPage = await firstRes.json();
+      if (!firstPage.length) throw new Error("No data returned from API.");
+      columns = Object.keys(firstPage[0]).filter(k => !k.startsWith(":"));
+
+      while (!done && !cancelled) {
+        // Build a batch of parallel requests
+        const batch = [];
+        for (let i = 0; i < PARALLEL; i++) {
+          const url = baseUrl + sep + "$limit=" + PAGE_SIZE + "&$offset=" + (offset + i * PAGE_SIZE);
+          batch.push(fetch(url).then(r => { if (!r.ok) throw new Error("Server returned " + r.status); return r.json(); }));
+        }
+
+        const pages = await Promise.all(batch);
+
+        for (const page of pages) {
+          if (!page.length || cancelled) { done = true; break; }
+          allRows = allRows.concat(page);
+          if (page.length < PAGE_SIZE) { done = true; break; }
+        }
+
+        offset += PARALLEL * PAGE_SIZE;
+        setStatus("Downloading… " + allRows.length.toLocaleString() + " rows", "info");
+      }
+
+      if (cancelled) {
+        setStatus("Cancelled. Downloaded " + allRows.length.toLocaleString() + " rows.", "info");
+      }
+
+      if (!cancelled) {
+        setProgress(100);
+        setStatus("✅ Loaded all " + allRows.length.toLocaleString() + " rows · " + columns.length + " columns", "success");
+        renderColumns(columns);
+      }
+
+    } catch (err) {
+      setStatus("Error: " + err.message, "error");
+      hideProgress();
+    } finally {
+      document.getElementById("fetchBtn").disabled = false;
+      document.getElementById("cancelBtn").style.display = "none";
+    }
+  }
+
+  function renderColumns(cols) {
+    const container = document.getElementById("fields");
+    container.innerHTML = "";
+    cols.forEach(col => {
+      const label = document.createElement("label");
+      label.className = "field-label";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "col-check";
+      cb.value = col;
+      cb.checked = true;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(" " + col.replace(/_/g, " ")));
+      container.appendChild(label);
+    });
+    document.getElementById("col-count").textContent =
+      cols.length + " columns — check the ones you want:";
+    document.getElementById("fields-section").style.display = "block";
+  }
+
+  function importData() {
+    const selected = Array.from(document.querySelectorAll(".col-check:checked"))
+      .map(el => el.value);
+    if (!selected.length) return setStatus("Pick at least one column.", "error");
+
+    imported = allRows.map(row => {
+      const obj = {};
+      selected.forEach(col => { obj[col] = row[col] != null ? row[col] : null; });
+      return obj;
+    });
+
+    document.getElementById("preview").textContent =
+      JSON.stringify(imported.slice(0, 3), null, 2);
+    document.getElementById("results-section").style.display = "block";
+    setStatus("Ready — " + imported.length.toLocaleString() + " rows · " + selected.length + " columns", "success");
+    document.getElementById("results-section").scrollIntoView({ behavior: "smooth" });
+  }
+
+  function exportJSON() {
+    if (!imported.length) return setStatus("Nothing imported yet.", "error");
+    downloadFile(
+      new Blob([JSON.stringify(imported, null, 2)], { type: "application/json" }),
+      "kcmo_export.json"
+    );
+  }
+
+  function exportCSV() {
+    if (!imported.length) return setStatus("Nothing imported yet.", "error");
+    const headers = Object.keys(imported[0]);
+    const csv = [
+      headers.join(","),
+      ...imported.map(row =>
+        headers.map(h => '"' + (row[h] != null ? row[h].toString().replace(/"/g, '""') : "") + '"').join(",")
+      )
+    ].join("\n");
+    downloadFile(new Blob([csv], { type: "text/csv" }), "kcmo_export.csv");
+  }
+
+  function downloadFile(blob, filename) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }
+</script>
+</body>
+</html>
